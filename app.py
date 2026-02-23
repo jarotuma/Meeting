@@ -27,6 +27,12 @@ if "chat_history" not in st.session_state:
 st.title("📝 Generátor manažerských zápisů")
 st.markdown("Nahraj audio ze schůzky, nech si vygenerovat zápis a pak se dole **přímo ptej umělé inteligence** na jakékoliv detaily z rozhovoru.")
 
+# --- NOVÉ UPOZORNĚNÍ O VELIKOSTI SOUBORU ---
+st.info("⚠️ **Limit velikosti souboru:** Systém zvládne zpracovat nahrávky do velikosti maximálně **25 MB**. "
+        "Pokud je tvá nahrávka větší, aplikace vyhodí chybu. "
+        "Ke zmenšení velkých souborů můžeš zdarma využít tento nástroj: "
+        "[Compress audio - Compress MP3, M4A, AAC, WAV online](https://www.freeconvert.com/audio-compressor)")
+
 # Nahrání souboru
 audio_file = st.file_uploader("Nahraj záznam ze schůzky (MP3, WAV, M4A)", type=['mp3', 'wav', 'm4a'])
 
