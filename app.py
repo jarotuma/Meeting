@@ -16,7 +16,7 @@ except:
     st.error("Chybí API klíče v nastavení aplikace.")
     st.stop()
 
-# --- PAMĚŤ APLIKACE (aby nezapomněla přepis, když se jí v chatu na něco zeptáš) ---
+# --- PAMĚŤ APLIKACE ---
 if "transcription" not in st.session_state:
     st.session_state.transcription = None
 if "zapis_text" not in st.session_state:
@@ -25,23 +25,26 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 st.title("📝 Generátor manažerských zápisů")
-st.markdown("Nahraj audio ze schůzky, nech si vygenerovat zápis a pak se dole **přímo ptej umělé inteligence** na jakékoliv detaily z rozhovoru.")
+st.markdown("Nahraj audio ze schůzky a vyber si, jakou šablonu zápisu chceš vygenerovat. Dole se pak můžeš doptávat v chatu.")
 
-# --- NOVÉ UPOZORNĚNÍ O VELIKOSTI SOUBORU ---
-st.info("⚠️ **Limit velikosti souboru:** Systém zvládne zpracovat nahrávky do velikosti maximálně **25 MB**. "
-        "Pokud je tvá nahrávka větší, aplikace vyhodí chybu. "
-        "Ke zmenšení velkých souborů můžeš zdarma využít tento nástroj: "
-        "[Compress audio - Compress MP3, M4A, AAC, WAV online](https://www.freeconvert.com/audio-compressor)")
+st.info("⚠️ **Limit velikosti souboru:** Maximálně **25 MB**. Větší soubory zmenši zdarma zde: [Compress audio online](https://www.freeconvert.com/audio-compressor)")
 
 # Nahrání souboru
 audio_file = st.file_uploader("Nahraj záznam ze schůzky (MP3, WAV, M4A)", type=['mp3', 'wav', 'm4a'])
 
-if st.button("🚀 Vygenerovat zápis", use_container_width=True):
+# --- DVĚ TLAČÍTKA VEDLE SEBE ---
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    btn_standard = st.button("🚀 Vygenerovat standardní zápis", use_container_width=True)
+with col_btn2:
+    btn_obecny = st.button("📋 Vygenerovat obecný zápis", use_container_width=True)
+
+# Spustí se, pokud uživatel klikne na JAKÉKOLIV z tlačítek
+if btn_standard or btn_obecny:
     if not audio_file:
         st.warning("Nejprve prosím nahraj soubor s audiem.")
     else:
         try:
-            # Vymazání starého chatu při nahrání nové schůzky
             st.session_state.chat_history = []
             
             # 1. PŘEPIS AUDIA
@@ -58,35 +61,58 @@ if st.button("🚀 Vygenerovat zápis", use_container_width=True):
                       language="cs"
                     )
                 os.remove("temp_audio.mp3")
-                # Uložení do paměti
                 st.session_state.transcription = vysledek_prepisu
             
             st.success("✅ Přepis byl úspěšně dokončen!")
 
-            # 2. TVORBA ZÁPISU
-            with st.spinner("⏳ Generuji manažerský zápis..."):
+            # 2. TVORBA ZÁPISU PODLE VYBRANÉ ŠABLONY
+            with st.spinner("⏳ Generuji zápis podle vybrané šablony..."):
                 genai.configure(api_key=gemini_api_key)
                 model = genai.GenerativeModel('gemini-2.5-flash')
                 
-                prompt = f"""
-                Jsi profesionální firemní asistent. Přečti si následující surový přepis ze schůzky a vytvoř z něj přehledný manažerský zápis v češtině.
-                Rozděl ho na:
-                1. Hlavní téma schůzky
-                2. Nejdůležitější probrané body (odrážky)
-                3. Učiněná rozhodnutí
-                4. Akční kroky / Úkoly (Kdo má co udělat)
+                # Pokud klikl na první tlačítko
+                if btn_standard:
+                    prompt = f"""
+                    Jsi profesionální firemní asistent. Přečti si následující surový přepis ze schůzky a vytvoř z něj přehledný manažerský zápis v češtině.
+                    Rozděl ho na:
+                    1. Hlavní téma schůzky
+                    2. Nejdůležitější probrané body (odrážky)
+                    3. Učiněná rozhodnutí
+                    4. Akční kroky / Úkoly (Kdo má co udělat)
+                    
+                    Zde je přepis:
+                    {st.session_state.transcription}
+                    """
                 
-                Zde je přepis:
-                {st.session_state.transcription}
-                """
+                # Pokud klikl na druhé tlačítko ("Obecný zápis")
+                elif btn_obecny:
+                    prompt = f"""
+                    Jsi profesionální firemní asistent. Přečti si následující surový přepis ze schůzky a vytvoř z něj přesný zápis v češtině PŘESNĚ podle následující šablony. 
+                    Dodržuj formátování (nadpisy, tučné písmo) a řiď se instrukcemi, které jsou uvedeny v hranatých závorkách.
+
+                    ## MANAZERSKE SHRNUTÍ
+                    **Cíl setkání:** [jedna az dve vety]
+                    **Klícová rozhodnutí:** [kazde rozhodnutí na novy radek s pomlckou;pokud zadne nepadlo napís: Bez formalnich rozhodnutí]
+                    ---
+                    ## DISKUTOVANÁ TÉMATA
+                    [kazde tema na novy radek s pomlckou, max 8 bodu]
+                    ---
+                    ## AKCNÍ KROKY
+                    | # | Úkol | Odpovědná osoba | Termín | Stav |
+                    |---|------|-----------------|--------|------|
+                    [radky tabulky; pokud neni termin nebo osoba napís Neurčeno; Stav vzdy Nový]
+
+                    Zde je přepis:
+                    {st.session_state.transcription}
+                    """
+
                 response = model.generate_content(prompt)
-                # Uložení do paměti
                 st.session_state.zapis_text = response.text
                 
         except Exception as e:
             st.error(f"Ouvej, něco se pokazilo: {e}")
 
-# --- ZOBRAZENÍ VÝSLEDKŮ A CHATU (Ukáže se jen tehdy, když už máme něco v paměti) ---
+# --- ZOBRAZENÍ VÝSLEDKŮ A CHATU ---
 if st.session_state.transcription and st.session_state.zapis_text:
     
     st.success("✅ Zápis je hotový!")
@@ -105,7 +131,7 @@ if st.session_state.transcription and st.session_state.zapis_text:
         doc_zapis.save(bio_zapis)
         
         st.download_button(
-            label="📝 Stáhnout manažerský zápis",
+            label="📝 Stáhnout zápis",
             data=bio_zapis.getvalue(),
             file_name="zapis_ze_schuzky.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -132,19 +158,15 @@ if st.session_state.transcription and st.session_state.zapis_text:
     st.markdown("### 💬 Zeptejte se na detaily ze schůzky")
     st.caption("Chybí vám v zápisu něco? Napište otázku a umělá inteligence to v textu dohledá.")
 
-    # Vykreslení historie chatu (aby zprávy nezmizely)
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Okénko pro zadání dotazu
     if user_question := st.chat_input("Zeptejte se... (např. 'Jaký byl dohodnutý termín spuštění?')"):
-        # Přidání otázky od uživatele
         st.session_state.chat_history.append({"role": "user", "content": user_question})
         with st.chat_message("user"):
             st.markdown(user_question)
 
-        # Odpověď od umělé inteligence
         with st.chat_message("assistant"):
             with st.spinner("Dohledávám v přepisu..."):
                 genai.configure(api_key=gemini_api_key)
@@ -163,5 +185,4 @@ if st.session_state.transcription and st.session_state.zapis_text:
                 
                 odpoved = model.generate_content(chat_prompt)
                 st.markdown(odpoved.text)
-                # Uložení odpovědi do paměti chatu
                 st.session_state.chat_history.append({"role": "assistant", "content": odpoved.text})
