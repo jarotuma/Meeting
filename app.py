@@ -9,7 +9,7 @@ import io
 st.set_page_config(page_title="Chytrý zápis ze schůzky", page_icon="📝", layout="centered")
 
 st.title("📝 Generátor manažerských zápisů")
-st.markdown("Nahraj audio ze schůzky a AI ti vygeneruje strukturovaný zápis ve Wordu.")
+st.markdown("Nahraj audio ze schůzky a AI ti vygeneruje strukturovaný zápis a kompletní přepis ve Wordu.")
 
 # Nahrání souboru
 audio_file = st.file_uploader("Nahraj záznam ze schůzky (MP3, WAV, M4A)", type=['mp3', 'wav', 'm4a'])
@@ -63,21 +63,43 @@ if st.button("🚀 Vygenerovat zápis", use_container_width=True):
             st.markdown("### Náhled zápisu:")
             st.write(zapis_text)
 
-            # 3. TVORBA WORDU PRO STAŽENÍ
-            doc = Document()
-            doc.add_heading('Zápis ze schůzky', 0)
-            doc.add_paragraph(zapis_text)
+            # 3. TVORBA WORD DOKUMENTŮ PRO STAŽENÍ
+            st.markdown("### 💾 Ke stažení:")
             
-            bio = io.BytesIO()
-            doc.save(bio)
+            # Vytvoření dvou sloupců pro tlačítka vedle sebe
+            col1, col2 = st.columns(2)
             
-            st.download_button(
-                label="💾 Stáhnout zápis jako Word (.docx)",
-                data=bio.getvalue(),
-                file_name="zapis_ze_schuzky.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
+            with col1:
+                # Word pro manažerský zápis
+                doc_zapis = Document()
+                doc_zapis.add_heading('Zápis ze schůzky', 0)
+                doc_zapis.add_paragraph(zapis_text)
+                bio_zapis = io.BytesIO()
+                doc_zapis.save(bio_zapis)
+                
+                st.download_button(
+                    label="📝 Stáhnout manažerský zápis",
+                    data=bio_zapis.getvalue(),
+                    file_name="zapis_ze_schuzky.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True
+                )
+                
+            with col2:
+                # Word pro kompletní přepis
+                doc_prepis = Document()
+                doc_prepis.add_heading('Kompletní přepis schůzky', 0)
+                doc_prepis.add_paragraph(transcription)
+                bio_prepis = io.BytesIO()
+                doc_prepis.save(bio_prepis)
+                
+                st.download_button(
+                    label="🗣️ Stáhnout doslovný přepis",
+                    data=bio_prepis.getvalue(),
+                    file_name="kompletni_prepis.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True
+                )
 
         except Exception as e:
             st.error(f"Ouvej, něco se pokazilo: {e}")
