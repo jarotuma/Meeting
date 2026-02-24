@@ -3,4 +3,3 @@ groq
 google-generativeai
 python-docx
 pydub
-pyaudioop
