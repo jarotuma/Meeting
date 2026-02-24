@@ -4,11 +4,13 @@ from groq import Groq
 import google.generativeai as genai
 from docx import Document
 import io
+from pydub import AudioSegment
+import math
 
 # Nastavení vzhledu
 st.set_page_config(page_title="Chytrý zápis ze schůzky", page_icon="📝", layout="centered")
 
-# Načtení klíčů z tajného trezoru
+# Načtení klíčů
 try:
     groq_api_key = st.secrets["GROQ_API_KEY"]
     gemini_api_key = st.secrets["GEMINI_API_KEY"]
@@ -25,21 +27,16 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 st.title("📝 Generátor manažerských zápisů")
-st.markdown("Nahraj audio ze schůzky a vyber si, jakou šablonu zápisu chceš vygenerovat. Dole se pak můžeš doptávat v chatu.")
+st.markdown("Nahraj audio ze schůzky. Aplikace si sama poradí i s velkými soubory (automaticky si je rozseká).")
 
-st.info("⚠️ **Limit velikosti souboru:** Maximálně **25 MB**. Větší soubory zmenši zdarma zde: [Compress audio online](https://www.freeconvert.com/audio-compressor)")
-
-# Nahrání souboru
 audio_file = st.file_uploader("Nahraj záznam ze schůzky (MP3, WAV, M4A)", type=['mp3', 'wav', 'm4a'])
 
-# --- DVĚ TLAČÍTKA VEDLE SEBE ---
 col_btn1, col_btn2 = st.columns(2)
 with col_btn1:
     btn_standard = st.button("🚀 Vygenerovat standardní zápis", use_container_width=True)
 with col_btn2:
     btn_obecny = st.button("📋 Vygenerovat obecný zápis", use_container_width=True)
 
-# Spustí se, pokud uživatel klikne na JAKÉKOLIV z tlačítek
 if btn_standard or btn_obecny:
     if not audio_file:
         st.warning("Nejprve prosím nahraj soubor s audiem.")
@@ -47,30 +44,68 @@ if btn_standard or btn_obecny:
         try:
             st.session_state.chat_history = []
             
-            # 1. PŘEPIS AUDIA
-            with st.spinner("⏳ Poslouchám a přepisuji audio (může to chvilku trvat)..."):
-                with open("temp_audio.mp3", "wb") as f:
-                    f.write(audio_file.getbuffer())
-                
-                client = Groq(api_key=groq_api_key)
-                with open("temp_audio.mp3", "rb") as file:
-                    vysledek_prepisu = client.audio.transcriptions.create(
-                      file=("temp_audio.mp3", file.read()),
-                      model="whisper-large-v3",
-                      response_format="text",
-                      language="cs"
-                    )
-                os.remove("temp_audio.mp3")
-                st.session_state.transcription = vysledek_prepisu
+            # --- CHYTRÉ ZPRACOVÁNÍ AUDIA ---
+            file_extension = audio_file.name.split('.')[-1].lower()
+            temp_filename = f"temp_original.{file_extension}"
             
+            # Uložení originálu
+            with open(temp_filename, "wb") as f:
+                f.write(audio_file.getbuffer())
+            
+            # Zjištění velikosti
+            file_size_mb = os.path.getsize(temp_filename) / (1024 * 1024)
+            client = Groq(api_key=groq_api_key)
+            full_transcription = ""
+
+            # Pokud je soubor větší než 24 MB, rozsekáme ho na 10minutové úseky
+            if file_size_mb > 24:
+                st.info(f"Soubor je velký ({file_size_mb:.1f} MB). Rozděluji ho na menší části. To může chvilku trvat...")
+                audio = AudioSegment.from_file(temp_filename)
+                
+                # 10 minut = 600 000 milisekund
+                chunk_length_ms = 10 * 60 * 1000 
+                chunks_count = math.ceil(len(audio) / chunk_length_ms)
+                
+                for i in range(chunks_count):
+                    start_time = i * chunk_length_ms
+                    end_time = (i + 1) * chunk_length_ms
+                    chunk = audio[start_time:end_time]
+                    
+                    chunk_filename = f"chunk_{i}.mp3"
+                    chunk.export(chunk_filename, format="mp3")
+                    
+                    with st.spinner(f"⏳ Poslouchám část {i+1} z {chunks_count}..."):
+                        with open(chunk_filename, "rb") as file:
+                            transcription = client.audio.transcriptions.create(
+                                file=(chunk_filename, file.read()),
+                                model="whisper-large-v3",
+                                response_format="text",
+                                language="cs"
+                            )
+                            full_transcription += transcription + " "
+                    
+                    os.remove(chunk_filename) # Úklid kousku
+            else:
+                # Běžný malý soubor
+                with st.spinner("⏳ Poslouchám a přepisuji audio..."):
+                    with open(temp_filename, "rb") as file:
+                        transcription = client.audio.transcriptions.create(
+                          file=(temp_filename, file.read()),
+                          model="whisper-large-v3",
+                          response_format="text",
+                          language="cs"
+                        )
+                        full_transcription = transcription
+
+            os.remove(temp_filename) # Úklid originálu
+            st.session_state.transcription = full_transcription
             st.success("✅ Přepis byl úspěšně dokončen!")
 
-            # 2. TVORBA ZÁPISU PODLE VYBRANÉ ŠABLONY
+            # --- TVORBA ZÁPISU ---
             with st.spinner("⏳ Generuji zápis podle vybrané šablony..."):
                 genai.configure(api_key=gemini_api_key)
                 model = genai.GenerativeModel('gemini-2.5-flash')
                 
-                # Pokud klikl na první tlačítko
                 if btn_standard:
                     prompt = f"""
                     Jsi profesionální firemní asistent. Přečti si následující surový přepis ze schůzky a vytvoř z něj přehledný manažerský zápis v češtině.
@@ -83,8 +118,6 @@ if btn_standard or btn_obecny:
                     Zde je přepis:
                     {st.session_state.transcription}
                     """
-                
-                # Pokud klikl na druhé tlačítko ("Obecný zápis")
                 elif btn_obecny:
                     prompt = f"""
                     Jsi profesionální firemní asistent. Přečti si následující surový přepis ze schůzky a vytvoř z něj přesný zápis v češtině PŘESNĚ podle následující šablony. 
@@ -119,7 +152,6 @@ if st.session_state.transcription and st.session_state.zapis_text:
     st.markdown("### Náhled zápisu:")
     st.write(st.session_state.zapis_text)
 
-    # 3. TVORBA WORD DOKUMENTŮ PRO STAŽENÍ
     st.markdown("### 💾 Ke stažení:")
     col1, col2 = st.columns(2)
     
@@ -153,11 +185,9 @@ if st.session_state.transcription and st.session_state.zapis_text:
             use_container_width=True
         )
 
-    # 4. CHATOVÁNÍ S PŘEPISEM
     st.markdown("---")
     st.markdown("### 💬 Zeptejte se na detaily ze schůzky")
-    st.caption("Chybí vám v zápisu něco? Napište otázku a umělá inteligence to v textu dohledá.")
-
+    
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
